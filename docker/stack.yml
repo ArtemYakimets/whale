@@ -1,0 +1,278 @@
+﻿version: "3.9"
+
+configs:
+  frps_ini:
+    file: ../config/frp/frps.ini
+  frpc_ini:
+    file: ../config/frp/frpc.ini
+
+secrets:
+  mysql_root_password:
+    external: true
+  mysql_ctfd_password:
+    external: true
+  ctfd_admin_password:
+    external: true
+  ctfd_secret_key:
+    external: true
+  frp_shared_token:
+    external: true
+
+volumes:
+  ctfd_uploads:
+  mysql_data:
+  redis_data:
+
+services:
+  traefik:
+    image: traefik:v2.11
+    command:
+      - --providers.docker.swarmMode=true
+      - --providers.docker.watch=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --entrypoints.web.address=:80
+      - --entrypoints.ping.address=:8082
+      - --entrypoints.websecure.address=:443
+      - --ping=true
+      - --ping.entrypoint=ping
+      - --providers.file.filename=/dynamic.yml
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /vagrant/config/traefik/dynamic.yml:/dynamic.yml:ro
+      - /vagrant/certs:/certs:ro
+    networks:
+      - ctfd_default
+    healthcheck:
+      test: ["CMD", "/traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+
+  mysql:
+    image: mariadb:10.11
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ctfd
+      MYSQL_USER: ctfd
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_ctfd_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+    secrets:
+      - mysql_ctfd_password
+      - mysql_root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mysqladmin ping -h 127.0.0.1 -uroot -p"$$(cat /run/secrets/mysql_root_password)" || exit 1'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+    networks:
+      - ctfd_default
+
+  redis:
+    image: redis:7.2
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+    networks:
+      - ctfd_default
+
+  ctfd:
+    image: local/ctfd-whale:latest
+    environment:
+      CTFD_DB_HOST: mysql
+      CTFD_DB_NAME: ctfd
+      CTFD_DB_USER: ctfd
+      CTFD_DB_PASSWORD_FILE: /run/secrets/mysql_ctfd_password
+      CTFD_ADMIN_EMAIL: admin@ctfd.local
+      CTFD_ADMIN_PASSWORD_FILE: /run/secrets/ctfd_admin_password
+      CTFD_SECRET_KEY_FILE: /run/secrets/ctfd_secret_key
+      CTFD_REDIS_URL: redis://redis:6379
+      CTFD_AUTO_CONNECT_NETWORK: whale_frp_containers
+      CTFD_LOG_LEVEL: INFO
+      WORKERS: 4
+    depends_on:
+      - mysql
+      - redis
+      - frpc
+    volumes:
+      - ctfd_uploads:/opt/CTFd/CTFd/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    secrets:
+      - mysql_ctfd_password
+      - ctfd_admin_password
+      - ctfd_secret_key
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:8000/ || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: 2
+      placement:
+        constraints:
+          - node.labels.name != swarm-mgr
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 20s
+    networks:
+      - ctfd_default
+      - frp_connect
+      - frp_containers
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ctfd.rule=Host(`ctfd.local`)
+      - traefik.http.routers.ctfd.entrypoints=websecure
+      - traefik.http.routers.ctfd.tls=true
+      - traefik.http.services.ctfd.loadbalancer.server.port=8000
+
+  frps:
+    image: local/frps:latest
+    configs:
+      - source: frps_ini
+        target: /etc/frp/frps.ini
+    secrets:
+      - frp_shared_token
+    environment:
+      FRP_BIND_PORT: 7897
+      FRP_HTTP_PORT: 8001
+      FRP_SUBDOMAIN_HOST: node.local
+    ports:
+      - target: 7897
+        published: 7897
+        protocol: tcp
+        mode: host
+      - target: 7897
+        published: 7897
+        protocol: udp
+        mode: host
+      - target: 8001
+        published: 8001
+        protocol: tcp
+        mode: host
+      - "10000-10100:10000-10100"
+      - "10000-10100:10000-10100/udp"
+    networks:
+      - ctfd_default
+      - frp_connect
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - nc -z localhost 7897
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+
+  frpc:
+    image: local/frpc:latest
+    configs:
+      - source: frpc_ini
+        target: /etc/frp/frpc.ini
+    secrets:
+      - frp_shared_token
+    environment:
+      FRP_SERVER_ADDR: frps
+      FRP_BIND_PORT: 7897
+      FRPC_ADMIN_ADDR: 0.0.0.0
+      FRPC_ADMIN_PORT: 7400
+    networks:
+      - frp_connect
+      - frp_containers
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - nc -z localhost 7400
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+
+networks:
+  ctfd_default:
+    external: true
+    name: ctfd_default
+  frp_connect:
+    external: true
+    name: frp_connect
+  frp_containers:
+    external: true
+    name: frp_containers

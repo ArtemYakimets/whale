@@ -1,0 +1,4 @@
+﻿tls:
+  certificates:
+    - certFile: /certs/ctfd-local.pem
+      keyFile: /certs/ctfd-local-key.pem

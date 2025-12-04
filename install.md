@@ -27,6 +27,52 @@ The commands above tries to install `docker-ce`，`python3-pip` and `docker-comp
 * GitHub is reachable
 * Docker Registry is reachable
 
+## Automated Vagrant Deployment
+
+This repository now contains a turnkey Vagrant + Docker Swarm lab. Running `vagrant up` provisions three Ubuntu VMs, installs Docker, creates overlay networks, builds the custom ctfd-whale/frps/frpc images, generates Docker secrets, and deploys the entire stack (Traefik, CTFd, Redis, MariaDB, frps, frpc). Whale is configured automatically, so no manual post steps are required.
+
+### Requirements
+
+* Hardware virtualization (VT-x/AMD-V) enabled in BIOS/UEFI
+* VirtualBox 7.x (or another Vagrant provider supported on your host)
+* Vagrant 2.4+
+* At least 8 GB RAM and ~50 GB of free disk space
+* Stable access to GitHub and Docker Hub
+
+### Usage
+
+```powershell
+cd Z:\Projects\whale
+vagrant up
+```
+
+Provisioning takes 10–20 minutes on a typical laptop (image builds plus stack deploy).
+
+Add the following records to your host `hosts` file (Windows: `C:\Windows\System32\drivers\etc\hosts`) so Traefik can route the preconfigured domains:
+
+```
+10.10.56.10 ctfd.local
+```
+
+FRP HTTP subdomains leverage `nip.io`, so names like `team1.10.10.56.10.nip.io` will automatically resolve to the manager's IP without extra host-file entries.
+
+The provisioning flow also generates TLS assets under `certs/` using `mkcert`. Import `certs/rootCA.pem` into your workstation's trusted root store (Windows: `certmgr.msc` → Trusted Root Certification Authorities) so the auto-issued certificate for `ctfd.local`/`*.10.10.56.10.nip.io` is trusted in the browser.
+
+When `vagrant up` finishes:
+
+1. Inspect `artifacts/secrets.generated` for the auto-generated admin, database, and FRP credentials (never committed to git).
+2. Verify the swarm from the manager: `vagrant ssh swarm-mgr -c "docker service ls"`.
+3. Browse to `https://ctfd.local`, log in with `admin@ctfd.local` plus the admin password from `artifacts/secrets.generated`, and start creating challenges.
+
+### Lifecycle & rolling updates
+
+* Tear down: `vagrant destroy -f`
+* Re-run the stack without reprovisioning VMs: `vagrant ssh swarm-mgr -c "docker stack deploy -c /vagrant/docker/stack.yml whale"`
+* Rolling update example (ctfd service): `vagrant ssh swarm-mgr -c "docker service update --image local/ctfd-whale:latest whale_ctfd"`
+* View generated artifacts/logs: `artifacts/services.log`, `artifacts/*.token`, `artifacts/secrets.generated`
+
+> The automation pre-populates `whale:auto_connect_network`, FRP API URL, port ranges, and swarm node labels via `python manage.py set_config`, so the Whale admin UI is ready to use immediately.
+
 ## Installation
 
 ### Start from scratch

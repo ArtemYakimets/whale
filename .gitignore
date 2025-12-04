@@ -1,4 +1,9 @@
 .vagrant/
 worker_join_token
-certs/
 /worker_join.sh
+certs/*
+!certs/.gitkeep
+!certs/**/.gitkeep
+artifacts/*
+!artifacts/.gitkeep
+!artifacts/**/.gitkeep
