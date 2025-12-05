@@ -1,0 +1,120 @@
+version: "3.8"
+
+volumes:
+  mysql_data:
+  redis_data:
+  ctfd_uploads:
+
+networks:
+  ctfd_default:
+    driver: overlay
+    attachable: true
+  frp_connect:
+    driver: overlay
+    attachable: true
+  frp_containers:
+    driver: overlay
+    attachable: true
+
+services:
+  mysql:
+    image: mariadb:10.11
+    environment:
+      MYSQL_ROOT_PASSWORD: "{{ mysql_root_password }}"
+      MYSQL_DATABASE: "{{ mysql_database }}"
+      MYSQL_USER: "{{ mysql_database }}"
+      MYSQL_PASSWORD: "{{ mysql_ctfd_password }}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - ctfd_default
+    deploy:
+      placement:
+        constraints:
+          - node.labels.index == 1
+
+  redis:
+    image: redis:7.2
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - ctfd_default
+    deploy:
+      placement:
+        constraints:
+          - node.labels.index == 1
+
+  frps:
+    image: fatedier/frps:0.58.1
+    command: ["-c", "/frp/frps.ini"]
+    volumes:
+      - {{ ctfd_base_path }}/conf/frp:/frp:ro
+    ports:
+      - "{{ frp_bind_port }}:{{ frp_bind_port }}"
+      - "{{ frp_http_port }}:{{ frp_http_port }}"
+      - "{{ frp_direct_min_port }}-{{ frp_direct_max_port }}:{{ frp_direct_min_port }}-{{ frp_direct_max_port }}"
+      - "{{ frp_direct_min_port }}-{{ frp_direct_max_port }}:{{ frp_direct_min_port }}-{{ frp_direct_max_port }}/udp"
+    networks:
+      - ctfd_default
+      - frp_connect
+    deploy:
+      placement:
+        constraints:
+          - node.labels.index == 1
+
+  frpc:
+    image: fatedier/frpc:0.58.1
+    command: ["-c", "/frp/frpc.ini"]
+    volumes:
+      - {{ ctfd_base_path }}/conf/frp:/frp:ro
+    networks:
+      - frp_connect
+      - frp_containers
+    deploy:
+      placement:
+        constraints:
+          - node.labels.index == 1
+
+  ctfd:
+    image: {{ ctfd_image_tag }}
+    environment:
+      DATABASE_URL: "mysql+pymysql://{{ mysql_database }}:{{ mysql_ctfd_password }}@mysql/{{ mysql_database }}"
+      REDIS_URL: "redis://redis:6379"
+      CTFD_ADMIN_EMAIL: "{{ ctfd_admin_email }}"
+      CTFD_ADMIN_PASSWORD: "{{ ctfd_admin_password }}"
+      CTFD_SECRET_KEY: "{{ ctfd_secret_key }}"
+      CTFD_REDIS_URL: "redis://redis:6379"
+      CTFD_AUTO_CONNECT_NETWORK: "{{ stack_name | default('ctfd') }}_frp_containers"
+    volumes:
+      - ctfd_uploads:/opt/CTFd/CTFd/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - mysql
+      - redis
+      - frpc
+    networks:
+      - ctfd_default
+      - frp_connect
+      - frp_containers
+    deploy:
+      placement:
+        constraints:
+          - node.labels.index == 1
+
+  nginx:
+    image: nginx:1.25
+    depends_on:
+      - ctfd
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - {{ ctfd_base_path }}/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - {{ ctfd_base_path }}/certs:/etc/nginx/certs:ro
+    networks:
+      - ctfd_default
+    deploy:
+      placement:
+        constraints:
+          - node.labels.index == 1

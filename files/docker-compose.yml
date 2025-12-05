@@ -1,0 +1,250 @@
+version: '3'
+networks:
+  pulsar:
+    driver: overlay
+    attachable: true
+services:
+  zookeeper-1:
+    image: zookeeper:latest
+    restart: on-failure
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - pulsar
+    # volumes:
+    #   - /home/swarm-admin/data/zookeeper:/data
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=0.0.0.0:2888:3888;2181 server.2=zookeeper-2:2888:3888;2181 server.3=zookeeper-3:2888:3888;2181
+      JVMFLAGS: -Xms256m -Xmx256m -XX:MaxDirectMemorySize=256m
+    healthcheck:
+      test: "echo ruok | nc 127.0.0.1 2181 || exit -1"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.index == 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      rollback_config:
+        parallelism: 0
+        order: start-first
+  zookeeper-2:
+    image: zookeeper:latest
+    restart: on-failure
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - pulsar
+    # volumes:
+    #   - /home/swarm-admin/data/zookeeper:/data
+    # Предвариетльно спулить образы или добавить задержки
+    environment:
+      ZOO_MY_ID: 2
+      ZOO_SERVERS: server.1=zookeeper-1:2888:3888;2181 server.2=0.0.0.0:2888:3888;2181 server.3=zookeeper-3:2888:3888;2181
+      JVMFLAGS: -Xms256m -Xmx256m -XX:MaxDirectMemorySize=256m
+    healthcheck:
+      test: "echo ruok | nc 127.0.0.1 2181 || exit -1"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.index == 2
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      rollback_config:
+        parallelism: 0
+        order: start-first
+  zookeeper-3:
+    image: zookeeper:latest
+    restart: on-failure
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - pulsar
+    # volumes:
+    #   - /home/swarm-admin/data/zookeeper:/data
+    environment:
+      ZOO_MY_ID: 3
+      ZOO_SERVERS: server.1=zookeeper-1:2888:3888;2181 server.2=zookeeper-2:2888:3888;2181 server.3=0.0.0.0:2888:3888;2181
+      JVMFLAGS: -Xms256m -Xmx256m -XX:MaxDirectMemorySize=256m
+    healthcheck:
+      test: "echo ruok | nc 127.0.0.1 2181 || exit -1"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.index == 3
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      rollback_config:
+        parallelism: 0
+        order: start-first
+  pulsar-init:
+    image: apachepulsar/pulsar:latest
+    command:
+      - bash
+      - -c
+      - |
+        sleep 40 && \
+        bin/pulsar initialize-cluster-metadata \
+        --cluster cluster-a \
+        --metadata-store  zk:zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181 \
+        --configuration-metadata-store  zk:zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181  \
+        --web-service-url http://broker:8080 \
+        --broker-service-url pulsar://broker:6650
+    networks:
+      - pulsar
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: none
+      placement:
+        constraints:
+          - node.role == manager
+    depends_on:
+      - zookeeper-1
+      - zookeeper-2
+      - zookeeper-3
+  bookie:
+    image: apachepulsar/pulsar:latest
+    container_name: bookie
+    restart: on-failure
+    networks:
+      - pulsar
+    environment:
+      - clusterName=cluster-a
+      - zkServers=zk:zookeeper-1:2181,zk:zookeeper-2:2181,zk:zookeeper-3:2181
+      - metadataServiceUri=zk://zookeeper-1:2181;zookeeper-2:2181;zookeeper-3:2181/ledgers
+      - advertisedAddress=bookie
+      - BOOKIE_MEM=-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m
+    depends_on:
+      - zookeeper-1
+      - zookeeper-2
+      - zookeeper-3
+      - pulsar-init
+    #Map the local directory to the container to avoid bookie startup failure due to insufficient container disks.
+    volumes:
+      - /home/swarm-admin/data/bookkeeper:/pulsar/data/bookkeeper
+    command: bash -c "sleep 60 && bin/apply-config-from-env.py conf/bookkeeper.conf && exec bin/pulsar bookie"
+    deploy:
+      mode: global
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      rollback_config:
+        parallelism: 0
+        order: start-first
+  broker:
+    image: apachepulsar/pulsar:latest
+    restart: on-failure
+    networks:
+      - pulsar
+    environment:
+      - metadataStoreUrl=zk:zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      - configurationMetadataStoreUrl=zk:zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      - clusterName=cluster-a
+      - managedLedgerDefaultEnsembleSize=3
+      - managedLedgerDefaultWriteQuorum=2
+      - managedLedgerDefaultAckQuorum=2
+      # - advertisedAddress=broker
+      - advertisedListeners=external:pulsar://127.0.0.1:6650
+      - PULSAR_MEM=-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m
+    depends_on:
+      - zookeeper-1
+      - zookeeper-2
+      - zookeeper-3
+      - pulsar-init
+      - bookie
+    command: bash -c "sleep 65 && bin/apply-config-from-env.py conf/broker.conf && exec bin/pulsar broker"
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      rollback_config:
+        parallelism: 0
+        order: start-first
+  proxy:
+    image: apachepulsar/pulsar:latest
+    restart: on-failure
+    networks:
+      - pulsar
+    depends_on:
+      - zookeeper-1
+      - zookeeper-2
+      - zookeeper-3
+      - pulsar-init
+      - bookie
+      - broker
+    ports:
+      - "6650:6650"
+      - "8080:8080"
+    environment:
+      - clusterName=cluster-a
+      - PULSAR_MEM=-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m
+    command:
+      - bash
+      - -c
+      - |
+        sleep 70 && \
+        bin/apply-config-from-env.py conf/proxy.conf && \
+        bin/pulsar proxy \
+        --metadata-store  zk:zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181 \
+        --configuration-metadata-store  zk:zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181  
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      rollback_config:
+        parallelism: 0
+        order: start-first

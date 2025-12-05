@@ -27,6 +27,45 @@ The commands above tries to install `docker-ce`，`python3-pip` and `docker-comp
 * GitHub is reachable
 * Docker Registry is reachable
 
+## Automated Vagrant Deployment
+
+For lab automation the repository already contains a Vagrant + Ansible workflow that provisions a three-node Docker Swarm and deploys CTFd with the Whale plugin, MySQL, Redis, FRP, and an HTTPS nginx front door.
+
+### Requirements
+
+* VirtualBox 7.x and Vagrant 2.4+
+* Hardware virtualization (VT-x/AMD-V) enabled
+* ≥8 GB RAM and 50 GB free disk space
+* Internet access to GitHub, Docker Hub, and ghcr.io
+
+### Bring-up
+
+```powershell
+cd Z:\Projects\whale
+vagrant up --no-parallel
+```
+
+Provisioning installs Docker on every VM, builds a custom `local/ctfd-whale:latest` image with the plugin baked in, generates FRP configs, and deploys the stack. It also issues a local TLS certificate using `mkcert`.
+
+Map the virtual IP to your workstation:
+
+```
+10.10.56.10 ctfd.local
+```
+
+After `vagrant up` completes:
+
+1. Import `rootCA.pem` (copied to the project root) into your OS trust store so the mkcert-issued certificate is accepted by your browser.
+2. Inspect or customize secrets in `inventory/group_vars/all/main.yml` (MySQL, admin password, FRP token).
+3. Check the swarm: `vagrant ssh docker-swarm-1 -c "docker service ls"`.
+4. Open `https://ctfd.local` and log in with the admin credentials defined in `inventory/group_vars/all/main.yml`.
+
+### Lifecycle
+
+* Tear down: `vagrant destroy -f`
+* Redeploy stack only: `vagrant ssh docker-swarm-1 -c "docker stack deploy -c /opt/ctfd/docker-stack.yml ctfd"`
+* Rolling update example: `vagrant ssh docker-swarm-1 -c "docker service update --image local/ctfd-whale:latest ctfd_ctfd"`
+
 ## Installation
 
 ### Start from scratch

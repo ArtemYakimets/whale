@@ -1,0 +1,13 @@
+FROM ctfd/ctfd:3.5.3
+
+USER root
+RUN printf 'deb http://archive.debian.org/debian buster main contrib non-free\n' > /etc/apt/sources.list \
+    && printf 'deb http://archive.debian.org/debian buster-updates main contrib non-free\n' >> /etc/apt/sources.list \
+    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth=1 https://github.com/frankli0324/CTFd-Whale /opt/CTFd/CTFd/plugins/ctfd-whale
+RUN pip install --no-cache-dir -r /opt/CTFd/CTFd/plugins/ctfd-whale/requirements.txt
+USER ctfd
+

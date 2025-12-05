@@ -1,0 +1,22 @@
+---
+ctfd_base_path: /opt/ctfd
+ctfd_image_tag: local/ctfd-whale:latest
+ctfd_domain: ctfd.local
+ctfd_domain_suffix: "10.10.56.10.nip.io"
+ctfd_cert_file: "{{ ctfd_domain }}.pem"
+ctfd_key_file: "{{ ctfd_domain }}-key.pem"
+ctfd_alt_names:
+  - "{{ ctfd_domain }}"
+  - "*.{{ ctfd_domain_suffix }}"
+ctfd_admin_email: admin@ctfd.local
+ctfd_admin_password: "ChangeMeAdmin123!"
+ctfd_secret_key: "change-this-secret-key"
+mysql_root_password: "SuperSecureRoot!"
+mysql_ctfd_password: "SuperSecureCtfd!"
+mysql_database: ctfd
+frp_token: "UseABetterToken"
+frp_bind_port: 7897
+frp_http_port: 8001
+frp_direct_min_port: 10000
+frp_direct_max_port: 10100
+frp_admin_port: 7400

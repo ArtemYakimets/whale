@@ -1,0 +1,73 @@
+- ansible.builtin.set_fact:
+    managers: "{{ docker_swarm_hosts | dict2items | selectattr('key', 'match', '.*managers.*') | map(attribute='value') | first  }}"
+    workers: "{{ docker_swarm_hosts | dict2items | selectattr('key', 'match', '.*workers.*') | map(attribute='value') | first  }}"
+- ansible.builtin.set_fact:
+    primary_manager: "{{ managers | first }}"
+- ansible.builtin.set_fact:
+    docker_swarm_primary_manager_advertise_addr: "{{ hostvars[primary_manager]['ansible_default_ipv4']['address'] }}"
+  when: docker_swarm_primary_manager_advertise_addr is not defined
+
+- name: Initialize Docker Swarm on first manager
+  when: primary_manager == inventory_hostname
+  block:
+  - name: Check Docker Swarm status
+    ansible.builtin.shell: docker info --format '{{ "{{.Swarm.LocalNodeState}}" }}'
+    register: docker_swarm_status
+    changed_when: false
+
+  - name: Initialize Docker Swarm
+    ansible.builtin.shell:
+      cmd: docker swarm init --advertise-addr {{ docker_swarm_primary_manager_advertise_addr }}
+    when: "'inactive' in docker_swarm_status.stdout"
+    register: swarm_init
+    changed_when: "'Swarm initialized' in swarm_init.stdout"
+
+  - name: Retrieve Docker Swarm manager token
+    ansible.builtin.shell: docker swarm join-token manager -q
+    register: manager_token
+    changed_when: false
+
+  - name: Retrieve Docker Swarm worker token
+    ansible.builtin.shell: docker swarm join-token worker -q
+    register: worker_token
+    changed_when: false
+- name: Join remaining managers to Docker Swarm
+  when:
+  - primary_manager != inventory_hostname
+  - inventory_hostname in managers
+  block:
+  - name: Check Docker Swarm status before attempting to join
+    ansible.builtin.shell: docker info --format '{{ "{{.Swarm.LocalNodeState}}" }}'
+    register: docker_swarm_status
+    changed_when: false
+
+  - name: Join Swarm as manager
+    ansible.builtin.shell:
+      cmd: docker swarm join --token {{ hostvars[primary_manager]['manager_token'].stdout }} {{ docker_swarm_primary_manager_advertise_addr }}:2377
+    when: hostvars[primary_manager]['manager_token'].stdout is defined and docker_swarm_status.stdout != "active"
+    register: swarm_join
+    changed_when: "'This node joined a swarm as a manager' in swarm_join.stdout"
+- name: Join workers to Docker Swarm
+  when: inventory_hostname in workers
+  block:
+  - name: Check if node is part of a swarm
+    ansible.builtin.shell: docker info --format '{{ "{{.Swarm.LocalNodeState}}" }}'
+    register: swarm_state
+    changed_when: false
+
+  - name: Join Swarm as worker if not already part of a swarm
+    ansible.builtin.shell:
+      cmd: docker swarm join --token {{ hostvars[primary_manager]['worker_token'].stdout }} {{ docker_swarm_primary_manager_advertise_addr }}:2377
+    when: swarm_state.stdout != 'active'
+    register: swarm_join
+    changed_when: "'This node joined a swarm as a worker' in swarm_join.stdout"
+- name: Set node labels
+  ansible.builtin.shell:
+    cmd: |
+      docker node update \
+      {% for label in hostvars[inventory_hostname].docker_swarm_labels %}
+      --label-add {{ label }} \
+      {% endfor %}
+      {{ ansible_hostname }}
+  when:
+  - hostvars[inventory_hostname].docker_swarm_labels is defined

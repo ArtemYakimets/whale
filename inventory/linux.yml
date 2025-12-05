@@ -1,0 +1,25 @@
+all:
+  children:
+    vagrant_cluster:
+      children:
+        vagrant_cluster_managers:
+          hosts:
+            192.168.56.10:
+              docker_swarm_labels: [ "index=1" ]
+              # ansible_ssh_private_key_file: ".vagrant/machines/node1/libvirt/private_key"
+              ansible_ssh_private_key_file: ".vagrant/machines/node1/virtualbox/private_key"
+              ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+            192.168.56.11:
+              docker_swarm_labels: [ "index=2" ]
+              # ansible_ssh_private_key_file: ".vagrant/machines/node2/libvirt/private_key"
+              ansible_ssh_private_key_file: ".vagrant/machines/node2/virtualbox/private_key"
+              ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+            192.168.56.12:
+              docker_swarm_labels: [ "index=3" ]
+              # ansible_ssh_private_key_file: ".vagrant/machines/node3/libvirt/private_key"
+              ansible_ssh_private_key_file: ".vagrant/machines/node3/virtualbox/private_key"
+              ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+        vagrant_cluster_workers:
+          hosts:
+      vars:
+        ansible_user: vagrant

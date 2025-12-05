@@ -1,0 +1,127 @@
+- hosts: all
+  become: true
+  vars:
+    stack_name: ctfd
+  tasks:
+    - name: Refresh apt cache
+      ansible.builtin.apt:
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Define swarm helpers
+      ansible.builtin.set_fact:
+        docker_swarm_hosts: "{{ groups }}"
+        docker_swarm_primary_manager_advertise_addr: 192.168.56.10
+        primary_manager: "{{ groups['vagrant_cluster_managers'] | first }}"
+
+    - name: Install docker with swarm
+      ansible.builtin.include_role:
+        name: docker
+      vars:
+        docker_users:
+          - "{{ ansible_user }}"
+
+    - name: Ensure base directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+      loop:
+        - "{{ ctfd_base_path }}"
+        - "{{ ctfd_base_path }}/conf"
+        - "{{ ctfd_base_path }}/conf/frp"
+        - "{{ ctfd_base_path }}/certs"
+        - "{{ ctfd_base_path }}/nginx"
+      tags: dirs
+
+    - name: Render FRPS config
+      ansible.builtin.template:
+        src: "../templates/frps.ini.j2"
+        dest: "{{ ctfd_base_path }}/conf/frp/frps.ini"
+        owner: root
+        mode: "0644"
+
+    - name: Render FRPC config
+      ansible.builtin.template:
+        src: "../templates/frpc.ini.j2"
+        dest: "{{ ctfd_base_path }}/conf/frp/frpc.ini"
+        owner: root
+        mode: "0644"
+
+    - name: Drop docker stack definition
+      ansible.builtin.template:
+        src: "../templates/docker.compose.yml.j2"
+        dest: "{{ ctfd_base_path }}/docker-stack.yml"
+        mode: "0644"
+
+    - name: Copy CTFd custom Dockerfile
+      ansible.builtin.template:
+        src: "../templates/Dockerfile.ctfd-whale.j2"
+        dest: "{{ ctfd_base_path }}/Dockerfile.ctfd-whale"
+        mode: "0644"
+
+    - name: Install mkcert dependencies
+      ansible.builtin.apt:
+        name:
+          - libnss3-tools
+          - ca-certificates
+        state: present
+      when: inventory_hostname == primary_manager
+
+    - name: Download mkcert binary
+      ansible.builtin.get_url:
+        url: "https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
+        dest: /usr/local/bin/mkcert
+        mode: "0755"
+      when: inventory_hostname == primary_manager
+
+    - name: Install mkcert root CA
+      ansible.builtin.command:
+        cmd: mkcert -install
+      when: inventory_hostname == primary_manager
+
+    - name: Generate TLS certificate
+      ansible.builtin.command: >
+        mkcert -cert-file {{ ctfd_base_path }}/certs/{{ ctfd_cert_file }}
+        -key-file {{ ctfd_base_path }}/certs/{{ ctfd_key_file }}
+        {{ ctfd_alt_names | map('regex_replace', '^(.*)$', '"\\1"') | join(' ') }}
+      args:
+        creates: "{{ ctfd_base_path }}/certs/{{ ctfd_cert_file }}"
+      when: inventory_hostname == primary_manager
+
+    - name: Copy mkcert root CA into certs dir
+      ansible.builtin.command: mkcert -CAROOT
+      register: mkcert_caroot
+      changed_when: false
+      when: inventory_hostname == primary_manager
+
+    - name: Sync mkcert root CA to workspace
+      ansible.builtin.copy:
+        src: "{{ mkcert_caroot.stdout }}/rootCA.pem"
+        dest: "{{ ctfd_base_path }}/certs/rootCA.pem"
+        remote_src: true
+      when: inventory_hostname == primary_manager
+
+    - name: Sync mkcert root CA to /vagrant
+      ansible.builtin.copy:
+        src: "{{ mkcert_caroot.stdout }}/rootCA.pem"
+        dest: "/vagrant/rootCA.pem"
+        remote_src: true
+      when: inventory_hostname == primary_manager
+
+    - name: Render nginx reverse-proxy config
+      ansible.builtin.template:
+        src: "../templates/nginx.conf.j2"
+        dest: "{{ ctfd_base_path }}/nginx/default.conf"
+        mode: "0644"
+
+    - name: Build custom ctfd-whale image
+      ansible.builtin.command:
+        cmd: docker build -t {{ ctfd_image_tag }} -f {{ ctfd_base_path }}/Dockerfile.ctfd-whale {{ ctfd_base_path }}
+      when: inventory_hostname == primary_manager
+
+    - name: Deploy CTFd stack
+      ansible.builtin.command:
+        cmd: docker stack deploy -c {{ ctfd_base_path }}/docker-stack.yml {{ stack_name }}
+      when: inventory_hostname == primary_manager
