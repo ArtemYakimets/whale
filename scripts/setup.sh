@@ -17,5 +17,7 @@ echo "$FRP_TOKEN" | docker secret create frp_token - || true
 echo "[INFO] Cloning CTFd repository..."
 git clone https://github.com/CTFd/CTFd --depth=1
 
-mv /vagrant/docker-compose.yml ~/CTFd/docker-compose.yml
-mv /vagrant/conf/ ~/CTFd/conf/
+cp /vagrant/docker-compose.yml ~/CTFd/docker-compose.yml
+cp -r /vagrant/conf/ ~/CTFd/conf/
+
+echo "[INFO] CTFd setup complete"
