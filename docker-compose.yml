@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   ctfd:
-    build: .
+    image: ctfd-whale:latest
     user: root
     restart: always
     ports:
@@ -19,12 +19,14 @@ services:
     volumes:
       - .data/CTFd/logs:/var/log/CTFd
       - .data/CTFd/uploads:/var/uploads
-      - .:/opt/CTFd:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - db
     networks:
         default:
         internal:
+        frp_containers:
+        frp_connect:
     deploy:
       replicas: 1
       placement:
@@ -81,16 +83,12 @@ services:
           - node.role == manager
 
   frps:
-    image: glzjin/frp
+    image: frps:latest
     restart: always
     volumes:
         - ./conf/frp:/conf
     secrets:
       - frp_token
-    entrypoint:
-        - /usr/local/bin/frps
-        - -c
-        - /conf/frps.ini
     ports:
         - 10000-10100:10000-10100  # for "direct" challenges
         - 8001:8001  # for "http" challenges
@@ -104,16 +102,12 @@ services:
           - node.role == manager
 
   frpc:
-    image: glzjin/frp:latest
+    image: frpc:latest
     restart: always
     volumes:
       - ./conf/frp:/conf/
     secrets:
       - frp_token
-    entrypoint:
-      - /usr/local/bin/frpc
-      - -c
-      - /conf/frpc.ini
     depends_on:
       - frps #need frps to run first
     networks:
@@ -136,3 +130,13 @@ networks:
         ipam:
             config:
                 - subnet: 172.1.0.0/16
+    frp_containers:
+        driver: overlay
+        attachable: true
+        ipam:
+            config:
+                - subnet: 174.1.0.0/16
+
+secrets:
+    frp_token:
+        external: true

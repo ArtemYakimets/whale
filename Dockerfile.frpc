@@ -1,0 +1,8 @@
+FROM glzjin/frp:latest
+
+# Copy custom entrypoint
+COPY docker/entrypoint-frpc.sh /entrypoint-frpc.sh
+RUN chmod +x /entrypoint-frpc.sh
+
+ENTRYPOINT ["/entrypoint-frpc.sh"]
+
