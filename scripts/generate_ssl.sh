@@ -8,7 +8,6 @@ echo "[INFO] Installing mkcert..."
 sudo apt-get update
 sudo apt-get install -y libnss3-tools wget
 
-# Download and install mkcert
 if ! command -v mkcert &> /dev/null; then
     sudo wget -q "https://dl.filippo.io/mkcert/latest?for=linux/amd64" -O /usr/local/bin/mkcert
     sudo chmod +x /usr/local/bin/mkcert
@@ -31,10 +30,9 @@ CAROOT="$CERT_DIR/ca" mkcert \
     127.0.0.1
 
 echo "[INFO] Generating Docker TLS certificates..."
-# CA certificate (copy from mkcert CA)
+
 cp "$CERT_DIR/ca/rootCA.pem" "$CERT_DIR/docker-ca.crt"
 
-# Generate Docker client certificate
 CAROOT="$CERT_DIR/ca" mkcert \
     -cert-file "$CERT_DIR/docker-client.crt" \
     -key-file "$CERT_DIR/docker-client.key" \

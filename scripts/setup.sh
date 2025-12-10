@@ -10,7 +10,6 @@ generate_token() {
 
 echo "[INFO] Setting up manager"
 
-# Set working directory
 DEPLOY_DIR="$HOME/ctfd-deployment"
 
 echo "[INFO] Creating deployment directory..."
