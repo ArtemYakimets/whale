@@ -2,5 +2,7 @@
 secrets/
 .data/
 CTFd/
+certs/
 *.log
+*.key
 .DS_Store

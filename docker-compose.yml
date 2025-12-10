@@ -38,8 +38,11 @@ services:
     restart: always
     volumes:
       - ./conf/nginx/http.conf:/etc/nginx/nginx.conf
+      - ./certs:/etc/nginx/certs:ro
     ports:
       - 80:80
+      - 443:443
+      - 8001:8001
     depends_on:
       - ctfd
     deploy:
@@ -91,7 +94,7 @@ services:
       - frp_token
     ports:
         - 10000-10100:10000-10100  # for "direct" challenges
-        - 8001:8001  # for "http" challenges
+        # 8001 now proxied through nginx with SSL on port 443
     networks:
         default:  # frps ports should be mapped to host
         frp_connect:
