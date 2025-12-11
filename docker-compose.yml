@@ -34,7 +34,7 @@ services:
         frp_containers:
         frp_connect:
     deploy:
-      replicas: 1
+      replicas: 2
       placement:
         constraints:
           - node.role == manager
@@ -42,7 +42,7 @@ services:
         parallelism: 1
         delay: 10s
         failure_action: continue
-        order: stop-first
+        order: start-first
       rollback_config:
         parallelism: 1
         delay: 10s
@@ -66,14 +66,14 @@ services:
       retries: 3
       start_period: 15s
     deploy:
-      replicas: 1
+      replicas: 2
       placement:
         constraints:
           - node.role == manager
       update_config:
         parallelism: 1
         delay: 5s
-        failure_action: rollback
+        failure_action: continue
         order: start-first
       rollback_config:
         parallelism: 1

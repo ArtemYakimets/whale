@@ -1,12 +1,11 @@
 #!/bin/bash
-# Скрипт rolling update с мониторингом (запускается на manager VM)
 
 LOGFILE=/tmp/rolling_update_monitor.log
 > $LOGFILE
 
 echo "[MONITOR] Starting background monitoring..."
 
-# Запускаем мониторинг в фоне (120 секунд)
+# Запускаем мониторинг в фоне (240 секунд)
 (
     for i in {1..240}; do
         STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000 2>/dev/null || echo "ERR")
@@ -16,7 +15,7 @@ echo "[MONITOR] Starting background monitoring..."
         else
             echo "[$TIMESTAMP] CTFd: $STATUS FAIL"
         fi
-        sleep 0.5
+        sleep 1
     done
 ) > $LOGFILE 2>&1 &
 MONITOR_PID=$!
@@ -36,7 +35,7 @@ echo "=== Deploying stack configuration ==="
 docker stack deploy -c docker-compose.yml ctfd
 
 echo ""
-echo "=== Force updating all services (in correct order) ==="
+echo "=== Updating all services ==="
 
 # Функция ожидания готовности сервиса
 wait_for_service() {
@@ -45,13 +44,13 @@ wait_for_service() {
     echo "  Waiting for $svc to be ready..."
     for i in $(seq 1 $max_wait); do
         REPLICAS=$(docker service ls --filter "name=$svc" --format "{{.Replicas}}" 2>/dev/null)
-        if [ "$REPLICAS" = "1/1" ]; then
-            echo "  $svc is ready!"
+        if [ "$REPLICAS" = "1/1" ] || [ "$REPLICAS" = "2/2" ]; then
+            echo "  $svc is ready! ($REPLICAS)"
             return 0
         fi
         sleep 1
     done
-    echo "  Warning: $svc may not be fully ready"
+    echo "  Warning: $svc may not be fully ready ($REPLICAS)"
     return 1
 }
 
@@ -64,21 +63,10 @@ for svc in ctfd_frps ctfd_frpc; do
     wait_for_service $svc 20
 done
 
-# 2. Потом инфраструктура (cache, db) - ВАЖНО дождаться!
+# 2. Затем приложения 
 echo ""
-echo "--- Phase 2: Infrastructure services ---"
-echo "Updating ctfd_cache..."
-docker service update --force ctfd_cache
-wait_for_service ctfd_cache 30
-
-echo "Updating ctfd_db..."
-docker service update --force ctfd_db
-wait_for_service ctfd_db 60
-
-# 3. В конце приложения (ctfd зависит от cache и db)
-echo ""
-echo "--- Phase 3: Application services ---"
-echo "Updating ctfd_ctfd (this takes longer)..."
+echo "--- Phase 2: Application services ---"
+echo "Updating ctfd_ctfd..."
 docker service update --force ctfd_ctfd
 wait_for_service ctfd_ctfd 120
 
