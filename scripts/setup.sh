@@ -27,6 +27,10 @@ echo "[INFO] Generating FRP token..."
 FRP_TOKEN=$(generate_token 64)
 echo "$FRP_TOKEN" | docker secret create frp_token - || true
 
+echo "[INFO] Generating CTFd secret key..."
+CTFD_SECRET_KEY=$(generate_token 64)
+echo "$CTFD_SECRET_KEY" | docker secret create ctfd_secret_key - || true
+
 echo "[INFO] Generating SSL certificates..."
 bash /vagrant/scripts/generate_ssl.sh "$DEPLOY_DIR/certs"
 
