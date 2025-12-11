@@ -1,0 +1,229 @@
+version: '3.8'
+
+services:
+  ctfd:
+    image: ctfd-whale:latest
+    user: root
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - UPLOAD_FOLDER=/var/uploads
+      - DATABASE_URL=mysql+pymysql://ctfd:ctfd@db/ctfd
+      - REDIS_URL=redis://cache:6379
+      - WORKERS=1
+      - LOG_FOLDER=/var/log/CTFd
+      - ACCESS_LOG=-
+      - ERROR_LOG=-
+      - REVERSE_PROXY=true
+    volumes:
+      - .data/CTFd/logs:/var/log/CTFd
+      - .data/CTFd/uploads:/var/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - db
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+        default:
+        internal:
+        frp_containers:
+        frp_connect:
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: continue
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+
+  nginx:
+    image: nginx:stable
+    restart: always
+    volumes:
+      - ./conf/nginx/http.conf:/etc/nginx/nginx.conf
+      - ./certs:/etc/nginx/certs:ro
+    ports:
+      - 80:80
+      - 443:443
+      - 8001:8001
+    depends_on:
+      - ctfd
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: continue
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+
+  db:
+    image: mariadb:10.11
+    restart: always
+    environment:
+      - MARIADB_ROOT_PASSWORD=ctfd
+      - MARIADB_USER=ctfd
+      - MARIADB_PASSWORD=ctfd
+      - MARIADB_DATABASE=ctfd
+      - MARIADB_AUTO_UPGRADE=1
+    volumes:
+      - .data/mysql:/var/lib/mysql
+    networks:
+        internal:
+    # This command is required to set important mariadb defaults
+    command: [mysqld, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --wait_timeout=28800, --log-warnings=0]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+
+  cache:
+    image: redis:4
+    restart: always
+    volumes:
+    - .data/redis:/data
+    networks:
+        internal:
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+
+  frps:
+    image: frps:latest
+    restart: always
+    volumes:
+        - ./conf/frp:/conf
+    secrets:
+      - frp_token
+    ports:
+        - 10000-10100:10000-10100  # for "direct" challenges
+        # 8001 now proxied through nginx with SSL on port 443
+    networks:
+        default:  # frps ports should be mapped to host
+        frp_connect:
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep frps || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+
+  frpc:
+    image: frpc:latest
+    restart: always
+    volumes:
+      - ./conf/frp:/conf/
+    secrets:
+      - frp_token
+    depends_on:
+      - frps #need frps to run first
+    networks:
+        frp_containers:
+        frp_connect:
+            ipv4_address: 172.1.0.3
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep frpc || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        parallelism: 1
+        delay: 5s
+        failure_action: rollback
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+
+networks:
+    default:
+    internal:
+        internal: true
+    frp_connect:
+        driver: overlay
+        internal: true
+        ipam:
+            config:
+                - subnet: 172.1.0.0/16
+    frp_containers:
+        driver: overlay
+        attachable: true
+        ipam:
+            config:
+                - subnet: 174.1.0.0/16
+
+secrets:
+    frp_token:
+        external: true

@@ -1,0 +1,29 @@
+FROM ctfd/ctfd:3.5.3
+
+USER root
+
+# Fix Debian Buster repositories (EOL - moved to archive)
+RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
+    sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
+    sed -i '/stretch-updates/d' /etc/apt/sources.list && \
+    sed -i '/buster-updates/d' /etc/apt/sources.list && \
+    echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/10no-check-valid-until
+
+# Install git and docker client
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git docker.io && \
+    rm -rf /var/lib/apt/lists/*
+
+# Clone CTFd-Whale plugin and install dependencies
+RUN git clone https://github.com/frankli0324/ctfd-whale /opt/CTFd/CTFd/plugins/ctfd-whale && \
+    cd /opt/CTFd/CTFd/plugins/ctfd-whale && \
+    pip install -r requirements.txt --no-cache-dir
+
+# Upgrade docker library to support newer Docker API versions
+RUN pip install --upgrade docker --no-cache-dir
+
+WORKDIR /opt/CTFd
+
+# Keep the original entrypoint from ctfd/ctfd image
+# ENTRYPOINT and CMD are inherited from base image
+

@@ -1,4 +1,8 @@
 .vagrant/
-worker_join_token
+secrets/
+.data/
+CTFd/
 certs/
-/worker_join.sh
+*.log
+*.key
+.DS_Store
