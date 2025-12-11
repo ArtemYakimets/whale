@@ -16,7 +16,6 @@ services:
       - ACCESS_LOG=-
       - ERROR_LOG=-
       - REVERSE_PROXY=true
-      - SECRET_KEY_FILE=/run/secrets/ctfd_secret_key
     secrets:
       - ctfd_secret_key
     volumes:
