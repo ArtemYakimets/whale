@@ -24,6 +24,8 @@ RUN pip install --upgrade docker --no-cache-dir
 
 WORKDIR /opt/CTFd
 
-# Keep the original entrypoint from ctfd/ctfd image
-# ENTRYPOINT and CMD are inherited from base image
+# Add custom entrypoint wrapper to read secrets
+COPY docker/ctfd-entrypoint.sh /opt/CTFd/ctfd-entrypoint.sh
+RUN chmod +x /opt/CTFd/ctfd-entrypoint.sh
 
+ENTRYPOINT ["/opt/CTFd/ctfd-entrypoint.sh"]
